@@ -1,0 +1,46 @@
+name: 정배열 스크리너 일일 스캔
+
+# 새벽 5시(KST) = 전날 20:00 UTC 에 자동 실행된다.
+# workflow_dispatch를 넣어둬서, 저장소의 Actions 탭에서 "Run workflow"
+# 버튼으로 언제든 수동 실행해서 테스트할 수도 있다.
+on:
+  schedule:
+    - cron: "0 20 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # 스캔 결과(docs/, backend/data)를 저장소에 다시 커밋하기 위함
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 파이썬 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 패키지 설치
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: 수집 + 스캔 + 정적 파일 생성 + 메일 발송
+        working-directory: backend
+        env:
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
+          SCREENER_SMTP_USER: ${{ secrets.SCREENER_SMTP_USER }}
+          SCREENER_SMTP_PASS: ${{ secrets.SCREENER_SMTP_PASS }}
+          SCREENER_MAIL_TO: ${{ secrets.SCREENER_MAIL_TO }}
+        run: python cloud_daily.py
+
+      - name: 결과를 저장소에 커밋
+        run: |
+          git config user.name "screener-bot"
+          git config user.email "screener-bot@users.noreply.github.com"
+          git add docs/ backend/data/
+          git diff --cached --quiet && echo "변경 없음" || git commit -m "일일 스캔 결과 갱신 [자동]"
+          git push
