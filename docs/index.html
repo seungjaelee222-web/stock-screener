@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>정배열 스크리너</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root{
+    --bg:#10141c; --panel:#171d28; --panel-2:#1d2431; --line:#232c3b;
+    --ink:#e4e8f0; --ink-dim:#8b95a9;
+    --up:#e5484d; --down:#4c8bf5;
+    --mono:'SFMono-Regular',ui-monospace,Consolas,Menlo,monospace;
+    --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Malgun Gothic',sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+       overflow:hidden;font-size:14px;-webkit-font-smoothing:antialiased}
+  button{font-family:inherit;font-size:12px;color:var(--ink);background:var(--panel-2);
+         border:1px solid var(--line);border-radius:5px;padding:6px 12px;cursor:pointer}
+  button:hover{border-color:#3a465c}
+
+  #app{display:flex;flex-direction:column;height:100%}
+  #bar{display:flex;align-items:center;gap:12px;padding:10px 18px;
+       background:var(--panel);border-bottom:1px solid var(--line);flex-shrink:0}
+  #bar h1{font-size:14px;font-weight:600;margin:0}
+  #bar .regime{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
+  #bar .grow{flex:1}
+  #bar .date{font-family:var(--mono);font-size:11px;color:var(--ink-dim)}
+
+  main{flex:1;display:flex;min-height:0}
+  #side{width:290px;flex-shrink:0;background:var(--panel);
+        border-right:1px solid var(--line);overflow-y:auto}
+  .blank{color:var(--ink-dim);font-size:13px;padding:36px 20px;line-height:1.7}
+  .row{padding:10px 14px;cursor:pointer;border-left:2px solid transparent}
+  .row:hover{background:var(--panel-2)}
+  .row[aria-current="true"]{background:var(--panel-2);border-left-color:#34d399}
+  .row .l1{display:flex;justify-content:space-between}
+  .row .nm{font-weight:600;font-size:13px}
+  .row .cd{font-family:var(--mono);font-size:11px;color:var(--ink-dim);margin-left:5px}
+  .row .px{font-family:var(--mono);font-size:13px}
+  .row .chg{font-family:var(--mono);font-size:11px;margin-top:3px}
+  .up{color:var(--up)} .down{color:var(--down)}
+
+  #main{flex:1;display:flex;flex-direction:column;min-width:0}
+  #head{padding:14px 20px;border-bottom:1px solid var(--line);display:none;
+        align-items:baseline;gap:12px;flex-shrink:0}
+  #head .nm{font-size:17px;font-weight:600}
+  #head .cd{font-family:var(--mono);font-size:11px;color:var(--ink-dim)}
+  #head .px{font-family:var(--mono);font-size:17px;font-weight:600}
+
+  #wrap{flex:1;position:relative;padding:8px 12px;min-height:0}
+  #hint{display:flex;align-items:center;justify-content:center;height:100%;
+        color:var(--ink-dim);font-size:13px;text-align:center;line-height:1.7}
+  #legend{position:absolute;top:12px;left:18px;z-index:5;display:none;gap:12px;
+          font-family:var(--mono);font-size:11px;color:var(--ink-dim)}
+  #legend i{display:inline-block;width:8px;height:2px;margin-right:4px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <h1>정배열 스크리너</h1>
+    <span class="regime" id="regime">-</span>
+    <span class="grow"></span>
+    <span class="date" id="date">기준일 -</span>
+    <button id="refresh">새로고침</button>
+  </div>
+  <main>
+    <div id="side"><div class="blank">불러오는 중...</div></div>
+    <div id="main">
+      <div id="head">
+        <span class="nm" id="hNm"></span>
+        <span class="cd" id="hCd"></span>
+        <span class="px" id="hPx"></span>
+        <span class="chg" id="hCh"></span>
+      </div>
+      <div id="wrap">
+        <div id="hint">왼쪽 목록에서 종목을 고르면 차트가 표시됩니다.<br>
+          이 목록은 GitHub Actions가 매일 새벽 만든 결과입니다 — 이 페이지에서 스캔을 실행하지 않습니다.</div>
+        <div id="legend">
+          <span><i style="background:#f0a83c"></i>5일</span>
+          <span><i style="background:#4c8bf5"></i>20일</span>
+          <span><i style="background:#34d399"></i>60일</span>
+          <span><i style="background:#c084fc"></i>120일</span>
+        </div>
+        <div id="price" style="display:none"></div>
+        <div id="vol" style="display:none"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const won = n => (n==null?'-':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:0}));
+let pc, vc, cs, vs, ms={}, picked=null;
+
+async function api(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(r.status===404 ? '아직 생성된 데이터가 없습니다' : r.statusText);
+  const j = await r.json().catch(()=>({ok:false,message:'파일 형식 오류'}));
+  if(!j.ok) throw new Error(j.message||'오류');
+  return j;
+}
+
+async function loadList(){
+  $('side').innerHTML = '<div class="blank">불러오는 중...</div>';
+  try{
+    const j = await api('./data/list.json');
+    $('regime').textContent = j.regime;
+    $('date').textContent = '기준일 ' + (j.base_date || '-');
+    render(j.items);
+  }catch(e){
+    $('side').innerHTML = `<div class="blank">불러오지 못했습니다.<br>${e.message}<br><br>
+      아직 첫 자동 스캔이 실행되지 않았을 수 있습니다. GitHub 저장소의 Actions 탭에서
+      워크플로우가 한 번 이상 성공했는지 확인하세요.</div>`;
+  }
+}
+
+function render(items){
+  if(!items.length){
+    $('side').innerHTML = '<div class="blank"><b>보유 중인 종목이 없습니다.</b><br>' +
+      '오늘 조건을 통과한 종목이 없다는 뜻입니다.</div>';
+    return;
+  }
+  $('side').innerHTML = '';
+  for(const it of items){
+    const d = document.createElement('div');
+    d.className = 'row';
+    d.setAttribute('aria-current', it.code===picked ? 'true':'false');
+    const sign = it.change_pct>=0 ? '+' : '';
+    const cls = it.change_pct>=0 ? 'up' : 'down';
+    d.innerHTML = `<div class="l1">
+        <div><span class="nm">${it.name}</span><span class="cd">${it.code}</span></div>
+        <div class="px">${won(it.close)}</div></div>
+      <div class="chg ${cls}">${sign}${it.change_pct}%</div>`;
+    d.onclick = () => pick(it);
+    $('side').appendChild(d);
+  }
+}
+
+function charts(){
+  if(pc) return;
+  const w = $('wrap').clientWidth - 24;
+  const base = {width:w, layout:{background:{color:'transparent'},textColor:'#8b95a9'},
+    grid:{vertLines:{color:'#1d2431'},horzLines:{color:'#1d2431'}},
+    rightPriceScale:{borderColor:'#232c3b'}, timeScale:{borderColor:'#232c3b'}};
+  pc = LightweightCharts.createChart($('price'), {...base, height:400});
+  cs = pc.addCandlestickSeries({upColor:'#e5484d',downColor:'#4c8bf5',
+      borderUpColor:'#e5484d',borderDownColor:'#4c8bf5',
+      wickUpColor:'#e5484d',wickDownColor:'#4c8bf5'});
+  const c={ma5:'#f0a83c',ma20:'#4c8bf5',ma60:'#34d399',ma120:'#c084fc'};
+  for(const k of Object.keys(c)) ms[k]=pc.addLineSeries({color:c[k],lineWidth:1,priceLineVisible:false});
+  vc = LightweightCharts.createChart($('vol'), {...base, height:110});
+  vs = vc.addHistogramSeries({priceFormat:{type:'volume'}});
+  pc.timeScale().subscribeVisibleLogicalRangeChange(r=>r&&vc.timeScale().setVisibleLogicalRange(r));
+  vc.timeScale().subscribeVisibleLogicalRangeChange(r=>r&&pc.timeScale().setVisibleLogicalRange(r));
+  addEventListener('resize',()=>{const w=$('wrap').clientWidth-24;
+    pc.applyOptions({width:w}); vc.applyOptions({width:w});});
+}
+
+async function pick(it){
+  picked = it.code;
+  document.querySelectorAll('#side .row').forEach(r=>r.removeAttribute('aria-current'));
+  render.current = it;
+  $('head').style.display='flex';
+  $('hNm').textContent = it.name; $('hCd').textContent = it.code;
+  $('hPx').textContent = won(it.close)+'원';
+  const sign = it.change_pct>=0?'+':'';
+  $('hCh').innerHTML = `<span class="${it.change_pct>=0?'up':'down'}">${sign}${it.change_pct}%</span>`;
+  $('hint').style.display='none'; $('legend').style.display='flex';
+  $('price').style.display='block'; $('vol').style.display='block';
+  try{
+    const j = await api(`./data/charts/${encodeURIComponent(it.code)}.json`);
+    charts();
+    cs.setData(j.data.candles); vs.setData(j.data.volumes);
+    for(const k of Object.keys(ms)) ms[k].setData(j.data.ma[k]||[]);
+    pc.timeScale().fitContent(); vc.timeScale().fitContent();
+  }catch(e){ $('hint').style.display='flex'; $('hint').textContent='차트를 불러오지 못했습니다: '+e.message; }
+  loadList();  // 선택 표시 갱신을 위해 목록만 다시 그림 (재계산 없음)
+}
+
+$('refresh').onclick = loadList;
+loadList();
+</script>
+</body>
+</html>

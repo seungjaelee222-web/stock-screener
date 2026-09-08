@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  맥 자동 실행 설정
+  1) 아래 두 곳의 경로를 본인 폴더로 바꾸세요 (PATH_TO 부분)
+  2) cp scheduler/com.local.screener.plist ~/Library/LaunchAgents/
+  3) launchctl load ~/Library/LaunchAgents/com.local.screener.plist
+  PC가 꺼져 있던 시간의 일정은 켜진 직후에 한 번 실행됩니다.
+-->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.local.screener</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/PATH_TO/stock-screener/backend/venv/bin/python3</string>
+    <string>/PATH_TO/stock-screener/backend/daily_scan.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>/PATH_TO/stock-screener/backend</string>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>5</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SCREENER_SMTP_USER</key><string>seungjaelee222@gmail.com</string>
+    <key>SCREENER_SMTP_PASS</key><string>앱비밀번호16자리</string>
+    <key>SCREENER_MAIL_TO</key><string>seungjaelee222@gmail.com</string>
+  </dict>
+  <key>StandardOutPath</key><string>/tmp/screener.log</string>
+  <key>StandardErrorPath</key><string>/tmp/screener.err</string>
+</dict></plist>
