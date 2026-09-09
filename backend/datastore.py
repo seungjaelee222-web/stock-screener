@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS scan_runs (
     base_date TEXT PRIMARY KEY,
     run_at TEXT, universe INTEGER, kept INTEGER,
     new_cnt INTEGER, hold_cnt INTEGER, drop_cnt INTEGER,
+    watch_cnt INTEGER DEFAULT 0,
     regime TEXT, mode TEXT
 );
 
@@ -47,7 +48,13 @@ CREATE TABLE IF NOT EXISTS scan_results (
     base_date TEXT NOT NULL, code TEXT NOT NULL, name TEXT, market TEXT,
     state TEXT, score INTEGER, align_days INTEGER, disparity REAL,
     ma120_slope REAL, value_trend REAL, close REAL, change_pct REAL,
-    reasons TEXT, score_detail TEXT,
+    vol_ratio REAL, reasons TEXT, score_detail TEXT,
+    PRIMARY KEY (base_date, code)
+);
+
+CREATE TABLE IF NOT EXISTS watch_results (
+    base_date TEXT NOT NULL, code TEXT NOT NULL, name TEXT, market TEXT,
+    close REAL, change_pct REAL, vol_ratio REAL, disparity REAL,
     PRIMARY KEY (base_date, code)
 );
 """
@@ -68,6 +75,16 @@ def conn():
 def init_db():
     with conn() as c:
         c.executescript(SCHEMA)
+        # 이미 GitHub에 배포된 DB(구버전 스키마)에 새 컬럼을 안전하게 추가한다.
+        # 컬럼이 이미 있으면 오류가 나는데, 그건 무시하면 된다.
+        try:
+            c.execute("ALTER TABLE scan_runs ADD COLUMN watch_cnt INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute("ALTER TABLE scan_results ADD COLUMN vol_ratio REAL")
+        except sqlite3.OperationalError:
+            pass
 
 
 # --- 시세 -------------------------------------------------------------------
@@ -194,7 +211,8 @@ def save_results(base_date: str, items: list):
     rows = [(base_date, i["code"], i.get("name"), i.get("market"), i["state"],
              i.get("score"), i.get("align_days"), i.get("disparity"),
              i.get("ma120_slope"), i.get("value_trend"), i.get("close"),
-             i.get("change_pct"), json.dumps(i.get("reasons", []), ensure_ascii=False),
+             i.get("change_pct"), i.get("vol_ratio"),
+             json.dumps(i.get("reasons", []), ensure_ascii=False),
              json.dumps(i.get("score_detail", {}), ensure_ascii=False))
             for i in items]
     with conn() as c:
@@ -204,16 +222,17 @@ def save_results(base_date: str, items: list):
         c.executemany(
             "INSERT OR REPLACE INTO scan_results "
             "(base_date,code,name,market,state,score,align_days,disparity,"
-            "ma120_slope,value_trend,close,change_pct,reasons,score_detail) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            "ma120_slope,value_trend,close,change_pct,vol_ratio,reasons,score_detail) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
 
 
-def save_run(base_date, run_at, universe, kept, n_new, n_hold, n_drop, regime, mode):
+def save_run(base_date, run_at, universe, kept, n_new, n_hold, n_drop, regime, mode,
+             n_watch=0):
     with conn() as c:
         c.execute("INSERT OR REPLACE INTO scan_runs "
-                  "(base_date,run_at,universe,kept,new_cnt,hold_cnt,drop_cnt,regime,mode) "
-                  "VALUES (?,?,?,?,?,?,?,?,?)",
-                  (base_date, run_at, universe, kept, n_new, n_hold, n_drop,
+                  "(base_date,run_at,universe,kept,new_cnt,hold_cnt,drop_cnt,watch_cnt,"
+                  "regime,mode) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  (base_date, run_at, universe, kept, n_new, n_hold, n_drop, n_watch,
                    json.dumps(regime, ensure_ascii=False), mode))
 
 
@@ -243,6 +262,30 @@ def last_run() -> dict:
     d = dict(r)
     d["regime"] = json.loads(d.get("regime") or "{}")
     return d
+
+
+def save_watch_results(base_date: str, items: list):
+    """관찰 후보(참고용) 저장. 재실행 시 그 날짜 것은 지우고 다시 쓴다."""
+    with conn() as c:
+        c.execute("DELETE FROM watch_results WHERE base_date=?", (base_date,))
+        c.executemany(
+            "INSERT OR REPLACE INTO watch_results "
+            "(base_date,code,name,market,close,change_pct,vol_ratio,disparity) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [(base_date, i["code"], i.get("name"), i.get("market"), i.get("close"),
+              i.get("change_pct"), i.get("vol_ratio"), i.get("disparity")) for i in items])
+
+
+def load_watch_results(base_date: str = None) -> list:
+    with conn() as c:
+        if base_date is None:
+            r = c.execute("SELECT MAX(base_date) d FROM watch_results").fetchone()
+            base_date = r["d"] if r else None
+        if not base_date:
+            return []
+        rows = c.execute("SELECT * FROM watch_results WHERE base_date=? "
+                         "ORDER BY vol_ratio DESC", (base_date,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 def run_history(limit: int = 60) -> list:

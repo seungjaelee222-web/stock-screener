@@ -40,6 +40,7 @@ def run_scan(base_date: str = None, mode: str = "live", progress_cb=None,
     caps = caps or {}
 
     items, n_new, n_hold, n_drop = [], 0, 0, 0
+    watch_items = []
     total = len(by_code)
 
     for i, (code, df) in enumerate(by_code.items()):
@@ -73,8 +74,33 @@ def run_scan(base_date: str = None, mode: str = "live", progress_cb=None,
             items.append(res)
         # NONE 은 저장하지 않는다 (관찰 대상이 아니었고 지금도 아님)
 
+        # --- 관찰 후보 (참고용, 정배열 아님) ---
+        # 이미 정배열 리스트(NEW/HOLD)에 있는 종목은 중복 표시하지 않는다.
+        if res["state"] not in ("NEW", "HOLD") and not screener.is_excluded_name(name) \
+                and not screener.has_trading_halt(ind):
+            w = screener.evaluate_watch(ind)
+            if w.get("passes"):
+                last = ind.iloc[-1]
+                prev_close = ind["close"].iloc[-2] if len(ind) > 1 else last["close"]
+                change_pct = round(float((last["close"] - prev_close) / prev_close * 100.0), 2) \
+                    if prev_close else 0.0
+                watch_item = {
+                    "code": code, "name": name, "market": market, "state": "WATCH",
+                    "close": float(last["close"]), "change_pct": change_pct,
+                    "vol_ratio": w["vol_ratio"], "disparity": w["disparity"],
+                    "sources": w["sources"], "reasons": w["reasons"],
+                }
+                watch_items.append(watch_item)
+
     if progress_cb:
         progress_cb(total, total)
+
+    # 거래량 배수가 큰 순서로 상위 N개만 남긴다 (전부 보여주면 신호가 아니라 소음이 된다)
+    # 두 신호 모두 확인된 종목을 우선하고, 그다음 거래량 배수 순.
+    # (그냥 거래량 순으로만 정렬하면 스테이지6 단독 신호가 항상 뒤로 밀린다)
+    watch_items.sort(key=lambda x: (-len(x.get("sources", [])), -(x["vol_ratio"] or 0)))
+    watch_items = watch_items[: screener.CONFIG["watch_max_items"]]
+    items.extend(watch_items)   # 같은 scan_results 테이블에 state=WATCH로 함께 저장
 
     idx = datastore.load_index(collector.INDEX_TICKER["KOSPI"])
     regime = screener.market_regime(idx) if not idx.empty else {"label": "판정 불가"}
@@ -82,10 +108,12 @@ def run_scan(base_date: str = None, mode: str = "live", progress_cb=None,
 
     datastore.save_results(base_date, items)
     datastore.save_run(base_date, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                       total, n_new + n_hold, n_new, n_hold, n_drop, regime, mode)
+                       total, n_new + n_hold, n_new, n_hold, n_drop, regime, mode,
+                       n_watch=len(watch_items))
 
     return {"base_date": base_date, "universe": total, "new": n_new,
-            "hold": n_hold, "drop": n_drop, "regime": regime, "items": items}
+            "hold": n_hold, "drop": n_drop, "regime": regime, "items": items,
+            "watch": watch_items}
 
 
 def daily_job(years: float = 5.0, mode: str = "live") -> dict:
@@ -166,5 +194,19 @@ def summarize_list_only(result: dict) -> str:
     if drops:
         lines.append("")
         lines.append("빠진 종목: " + ", ".join(drops))
+
+    watch = result.get("watch") or []
+    if watch:
+        lines.append("")
+        lines.append("─" * 40)
+        lines.append("[참고용 · 검증 안 됨] 관찰 후보")
+        lines.append("정배열 확정 종목이 아닙니다. 아래는 단기 관심이 쏠렸거나")
+        lines.append("이평선 구조가 막 바뀌었다는 신호일 뿐, 과거 데이터로")
+        lines.append("검증되지 않았습니다.")
+        for w in watch:
+            tag = "+".join(w.get("sources") or []) or "관찰"
+            detail = " / ".join(w.get("reasons") or [])
+            lines.append(f"  [{tag}] {w['name']}({w['code']})  {w['close']:,.0f}원  "
+                         f"{w['change_pct']:+.1f}%  {detail}")
 
     return "\n".join(lines)

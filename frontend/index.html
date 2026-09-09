@@ -30,8 +30,9 @@
   #bar .date{font-family:var(--mono);font-size:11px;color:var(--ink-dim)}
 
   main{flex:1;display:flex;min-height:0}
-  #side{width:290px;flex-shrink:0;background:var(--panel);
-        border-right:1px solid var(--line);overflow-y:auto}
+  #sideCol{width:290px;flex-shrink:0;display:flex;flex-direction:column;
+           background:var(--panel);border-right:1px solid var(--line);min-height:0}
+  #side{flex:1;overflow-y:auto;min-height:0}
   .blank{color:var(--ink-dim);font-size:13px;padding:36px 20px;line-height:1.7}
   .row{padding:10px 14px;cursor:pointer;border-left:2px solid transparent}
   .row:hover{background:var(--panel-2)}
@@ -42,6 +43,24 @@
   .row .px{font-family:var(--mono);font-size:13px}
   .row .chg{font-family:var(--mono);font-size:11px;margin-top:3px}
   .up{color:var(--up)} .down{color:var(--down)}
+
+  /* 관찰 후보 (참고용, 검증 안 됨) — 신뢰도가 다른 정보임을 색으로 구분 */
+  #watchWrap{border-top:1px solid var(--line);flex-shrink:0;max-height:45%;
+             display:flex;flex-direction:column}
+  #watchHead{padding:12px 14px 6px;cursor:pointer;user-select:none}
+  #watchHead .t{font-size:12px;font-weight:600;color:#e0a94c;display:flex;
+                align-items:center;gap:6px}
+  #watchHead .t::before{content:'▲';font-size:9px}
+  #watchHead .warn{font-size:11px;color:var(--ink-dim);margin-top:3px;line-height:1.5}
+  #watchList{display:none;overflow-y:auto}
+  #watchList.open{display:block}
+  .wrow{padding:8px 14px;border-left:2px solid transparent;cursor:pointer}
+  .wrow:hover{background:var(--panel-2)}
+  .wrow .l1{display:flex;justify-content:space-between}
+  .wrow .nm{font-weight:600;font-size:12.5px;color:#d8c9a8}
+  .wrow .cd{font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);margin-left:5px}
+  .wrow .px{font-family:var(--mono);font-size:12.5px}
+  .wrow .l2{font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);margin-top:3px}
 
   #main{flex:1;display:flex;flex-direction:column;min-width:0}
   #head{padding:14px 20px;border-bottom:1px solid var(--line);display:none;
@@ -68,7 +87,17 @@
     <button id="refresh">새로고침</button>
   </div>
   <main>
-    <div id="side"><div class="blank">불러오는 중...</div></div>
+    <div id="sideCol">
+      <div id="side"><div class="blank">불러오는 중...</div></div>
+      <div id="watchWrap">
+        <div id="watchHead" onclick="toggleWatch()">
+          <div class="t">관찰 후보 (참고용) <span id="watchCount"></span></div>
+          <div class="warn">정배열 확정 종목이 아닙니다. 거래량 급증 또는
+            이평선 구조 변화(스테이지6) 신호일 뿐, 검증되지 않았습니다.</div>
+        </div>
+        <div id="watchList"></div>
+      </div>
+    </div>
     <div id="main">
       <div id="head">
         <span class="nm" id="hNm"></span>
@@ -180,8 +209,46 @@ async function pick(it){
   loadList();  // 선택 표시 갱신을 위해 목록만 다시 그림 (재계산 없음)
 }
 
-$('refresh').onclick = loadList;
+$('refresh').onclick = () => { loadList(); loadWatch(); };
 loadList();
+loadWatch();
+
+async function loadWatch(){
+  try{
+    const j = await api('/api/watch');
+    renderWatch(j.items || []);
+  }catch(e){
+    $('watchCount').textContent = '';
+    $('watchList').innerHTML = `<div class="blank" style="padding:16px">불러오지 못했습니다.</div>`;
+  }
+}
+
+function renderWatch(items){
+  $('watchCount').textContent = items.length ? `(${items.length})` : '';
+  const el = $('watchList');
+  if(!items.length){
+    el.innerHTML = '<div class="blank" style="padding:16px 14px;font-size:12px">오늘은 해당하는 종목이 없습니다.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  for(const it of items){
+    const d = document.createElement('div');
+    d.className = 'wrow';
+    const sign = it.change_pct>=0 ? '+' : '';
+    const cls = it.change_pct>=0 ? 'up' : 'down';
+    d.innerHTML = `<div class="l1">
+        <div><span class="nm">${it.name}</span><span class="cd">${it.code}</span></div>
+        <div class="px">${won(it.close)}</div></div>
+      <div class="l2"><span class="${cls}">${sign}${it.change_pct}%</span>
+        &nbsp;${(it.reasons||[]).join(' · ')}</div>`;
+    d.onclick = () => pick(it);
+    el.appendChild(d);
+  }
+}
+
+function toggleWatch(){
+  $('watchList').classList.toggle('open');
+}
 </script>
 </body>
 </html>

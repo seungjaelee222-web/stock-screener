@@ -46,6 +46,22 @@ def list_stocks():
                     "base_date": run.get("base_date"), "regime": regime})
 
 
+@app.route("/api/watch")
+def watch_stocks():
+    """관찰 후보 (참고용, 정배열 아님) — /api/list 와 반드시 분리해서 제공한다."""
+    items = datastore.load_results()
+    watch = [i for i in items if i["state"] == "WATCH"]
+    watch.sort(key=lambda x: x.get("vol_ratio") or 0, reverse=True)
+    slim = [{"code": i["code"], "name": i["name"], "market": i["market"],
+             "close": i["close"], "change_pct": i["change_pct"],
+             "vol_ratio": i.get("vol_ratio"), "disparity": i.get("disparity"),
+             "reasons": i.get("reasons") or []}
+            for i in watch]
+    run = datastore.last_run()
+    return jsonify({"ok": True, "items": slim, "base_date": run.get("base_date"),
+                    "note": "정배열 확정 신호가 아닙니다. 참고용 후보입니다."})
+
+
 @app.route("/api/chart/<code>")
 def chart(code):
     if not CODE_RE.match(code or ""):
