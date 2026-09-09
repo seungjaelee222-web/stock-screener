@@ -76,7 +76,7 @@ def chart(code):
 if __name__ == "__main__":
     datastore.init_db()
     print("=" * 56)
-    print(f"  정배열 스크리너 ver2.0 · 웹 뷰어(로컬)   http://localhost:{PORT}")
+    print(f"  정배열 스크리너 ver2.2 · 웹 뷰어(로컬)   http://localhost:{PORT}")
     print("  (스캔은 하지 않습니다 — daily_scan.py가 새벽에 처리)")
     print("=" * 56)
     app.run(host="127.0.0.1", port=PORT, debug=False)

@@ -142,7 +142,7 @@ def summarize(result: dict) -> str:
     lines.append(f"[정배열 스크리너] 기준일 {result['base_date']}")
     lines.append(f"시장 국면: {r.get('label')} (1군 비중 {r.get('group1_ratio')}%)")
     lines.append(f"편입 {result['new']} · 유지 {result['hold']} · 편출 {result['drop']}"
-                 f" / 검사 {result['universe']}종목")
+                 f" · 관찰후보 {len(result.get('watch') or [])} / 검사 {result['universe']}종목")
     lines.append("")
 
     news = [i for i in result["items"] if i["state"] == "NEW"]
@@ -169,6 +169,17 @@ def summarize(result: dict) -> str:
         for i in sorted(holds, key=lambda x: -x["score"])[:20]:
             lines.append(f"  {i['name']}({i['code']}) 점수 {i['score']} | "
                          f"정배열 {i['align_days']}일차 | 이격도 {i['disparity']}%")
+
+    watch = result.get("watch") or []
+    lines.append("")
+    lines.append(f"■ 관찰 후보 (참고용) — {len(watch)}개")
+    if watch:
+        for w in watch:
+            tag = "+".join(w.get("sources") or []) or "관찰"
+            detail = " / ".join(w.get("reasons") or [])
+            lines.append(f"  [{tag}] {w['name']}({w['code']}) {w['close']:,.0f}원 "
+                         f"{w['change_pct']:+.1f}% | {detail}")
+
     return "\n".join(lines)
 
 
@@ -177,13 +188,20 @@ def summarize_list_only(result: dict) -> str:
 
     보유 중(NEW+HOLD) 종목을 등락률 순으로 나열한다. 편출 종목은 이름만
     한 줄로 붙인다 — 왜 빠졌는지는 궁금하면 웹에서 차트로 확인하면 된다.
+
+    두 섹션(확정 정배열 / 관찰 후보) 모두 개수를 항상 표시하고, 0개일
+    때도 섹션 자체를 숨기지 않는다. 섹션이 통째로 안 보이면 "기능이
+    작동은 한 건지, 그냥 후보가 없는 건지" 헷갈리기 때문이다.
     """
     kept = [i for i in result["items"] if i["state"] in ("NEW", "HOLD")]
     kept.sort(key=lambda x: x.get("change_pct", 0), reverse=True)
+    watch = result.get("watch") or []
 
     lines = [f"정배열 스크리너 {result['base_date']} 기준", ""]
+
+    lines.append(f"■ 확정 정배열 종목 ({len(kept)}개)")
     if not kept:
-        lines.append("오늘 목록에 있는 종목이 없습니다.")
+        lines.append("조건에 부합하는 종목이 없습니다.")
     else:
         for i in kept:
             mark = "신규" if i["state"] == "NEW" else "유지"
@@ -195,14 +213,15 @@ def summarize_list_only(result: dict) -> str:
         lines.append("")
         lines.append("빠진 종목: " + ", ".join(drops))
 
-    watch = result.get("watch") or []
-    if watch:
-        lines.append("")
-        lines.append("─" * 40)
-        lines.append("[참고용 · 검증 안 됨] 관찰 후보")
-        lines.append("정배열 확정 종목이 아닙니다. 아래는 단기 관심이 쏠렸거나")
-        lines.append("이평선 구조가 막 바뀌었다는 신호일 뿐, 과거 데이터로")
-        lines.append("검증되지 않았습니다.")
+    lines.append("")
+    lines.append("─" * 40)
+    lines.append(f"■ 관찰 후보 (참고용 · 검증 안 됨) — {len(watch)}개")
+    lines.append("정배열 확정 종목이 아닙니다. 거래량 급증 또는 이평선 구조")
+    lines.append("변화(스테이지6) 신호가 있는 종목만 보여줍니다. 과거 데이터로")
+    lines.append("검증되지 않았으니 참고만 해주세요.")
+    if not watch:
+        lines.append("오늘은 해당하는 종목이 없습니다.")
+    else:
         for w in watch:
             tag = "+".join(w.get("sources") or []) or "관찰"
             detail = " / ".join(w.get("reasons") or [])
